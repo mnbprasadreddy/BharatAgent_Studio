@@ -504,6 +504,21 @@ def test_a_deleted_source_is_never_reused_through_conversation_history(world, mo
     assert all(c["file"] != "temporary.pdf" for c in events[-1].get("citations") or [])
 
 
+def test_project_source_names_come_only_from_sources_this_run_may_search(world):
+    """The names added to a vague first question are read from the sources being searched, in this project's
+    scope only: another project's sources (or a deleted one) never leak into the search."""
+    from app.rag import store
+    a = world["a"]
+    p1, p2 = project_in(a, world["org"], "Names one"), project_in(a, world["org"], "Names two")
+    keep = a.add_pdf(p1, "Visible Handbook.pdf", make_pdf(REFUND_POLICY)).json()["id"]
+    gone = a.add_pdf(p1, "Removed Notes.pdf", make_pdf(HOSTEL_RULES)).json()["id"]
+    other = a.add_pdf(p2, "Other Project Secret.pdf", make_pdf(HOSTEL_RULES)).json()["id"]
+    a.delete(f"/sources/{gone}")
+    ids = [f"src{keep}", f"src{gone}", f"src{other}"]
+    assert store.source_titles(f"project:{p1}", ids) == ["Visible Handbook.pdf"]
+    assert store.source_titles(f"project:{p2}", ids) == ["Other Project Secret.pdf"]
+
+
 def test_project_chat_uses_every_ready_project_source(world):
     r, events = world["c"].ask(question="refund policy", project_id=world["proj"])
     agent = next(e for e in events if e.get("stage") == "agent" and e.get("status") == "done")

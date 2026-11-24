@@ -68,6 +68,8 @@ def main():
     ap.add_argument("--mode", default="project", choices=["project", "agent"])
     ap.add_argument("--api", default="http://127.0.0.1:8000")
     ap.add_argument("--out", help="JSON file for the full record")
+    ap.add_argument("--only-main", action="store_true",
+                    help="a project with only the main PDF (no second document, so 'it' cannot mean another one)")
     ap.add_argument("--turns", help="run only these turns, in order, e.g. 1,3,9,10 (a targeted re-check)")
     ap.add_argument("--pause", type=float, default=0, help="seconds between turns (Groq's free tier limits tokens per minute)")
     args = ap.parse_args()
@@ -75,15 +77,15 @@ def main():
     acct = sign_up(args.api, f"conv-{args.model}-{args.mode}")
     c = acct.client
     main_id = add_file(acct, Path(args.pdf))
-    other_id = add_file(acct, ROOT / "samples" / "ecommerce-architecture.pdf")
+    other_id = None if args.only_main else add_file(acct, ROOT / "samples" / "ecommerce-architecture.pdf")
     graph_id = None
     if args.mode == "agent":
         main_nodes = ["input", "guardrails", "router", "agent", "output"]
         nodes = [{"id": f"n{i + 1}", "type": t, "config": {"model": args.model, "language": "en"} if t == "agent" else {}}
                  for i, t in enumerate(main_nodes)]
-        nodes += [{"id": "doc_main", "type": "source_doc", "config": {"source_ref": main_id}},
-                  {"id": "doc_shop", "type": "source_doc", "config": {"source_ref": other_id}}]
-        edges = [{"from": f"n{i}", "to": f"n{i + 1}"} for i in range(1, 5)] + [{"from": n, "to": "n4"} for n in ("doc_main", "doc_shop")]
+        docs = {"doc_main": main_id, **({"doc_shop": other_id} if other_id else {})}
+        nodes += [{"id": n, "type": "source_doc", "config": {"source_ref": sid}} for n, sid in docs.items()]
+        edges = [{"from": f"n{i}", "to": f"n{i + 1}"} for i in range(1, 5)] + [{"from": n, "to": "n4"} for n in docs]
         r = c.post("/graphs", json={"project_id": acct.project_id, "name": "Conversation check agent",
                                     "graph": {"nodes": nodes, "edges": edges}})
         r.raise_for_status()

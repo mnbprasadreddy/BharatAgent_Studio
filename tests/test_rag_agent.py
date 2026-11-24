@@ -352,3 +352,38 @@ def test_detailed_answers_are_shorter_in_telugu_and_hindi():
     for lang in ("te", "hi"):
         assert "up to 4 full sentences" in prompt.rag_prompt("q", [HANDOFF], detailed=True, language=lang)
     assert "one or two full sentences" in prompt.rag_prompt("q", [HANDOFF], detailed=False, language="te")
+
+
+def test_vague_first_question_is_searched_with_the_project_source_names(monkeypatch, full_graph):
+    """Reported after the follow-up fix: "What are its main features?" as the FIRST message of a new chat matched
+    nothing (0.425 < 0.50) because there was no earlier message to say what "its" is. The project's source names
+    are now searched with it; no model call is added, and a run without sources the person may search adds nothing."""
+    from app.rag import store
+    searched = _searches(monkeypatch, lambda q: [HANDOFF] if "BharatAgent Studio Build Handoff" in q else [])
+    asked = []
+    monkeypatch.setattr(store, "source_titles", lambda scope, ids: asked.append(ids) or ["BharatAgent Studio Build Handoff _1_.pdf"])
+    calls = _models(monkeypatch)
+    events = list(run_pipeline(Graph.model_validate(only_s1(full_graph)), "What are its main features?",
+                               source_map={"s1": "src208"}))
+    retrieval = next(e for e in events if e.get("stage") == "agent" and e.get("status") == "done")["detail"]["retrieval"]
+    assert searched[0] == "What are its main features? BharatAgent Studio Build Handoff 1"
+    assert asked == [["src208"]] and retrieval["project_subject"] is True and calls == ["answer"]
+    assert events[-1]["supported"] is True and events[-1]["citations"]
+
+
+def test_specific_first_questions_and_unanswerable_ones_are_unchanged(monkeypatch, full_graph):
+    from app.rag import conversation, store
+    searched = _searches(monkeypatch, lambda q: [])
+    monkeypatch.setattr(store, "source_titles", lambda scope, ids: ["BharatAgent Studio Build Handoff.pdf"])
+    _models(monkeypatch)
+    result = list(run_pipeline(Graph.model_validate(only_s1(full_graph)),
+                               "What is the monthly parking fee at the company office?", source_map={"s1": "src208"}))[-1]
+    assert searched == ["What is the monthly parking fee at the company office?"]   # not vague: searched as it is
+    assert result["supported"] is False and result["answer"] in DONT_KNOW.values()
+    searched.clear()
+    result = list(run_pipeline(Graph.model_validate(only_s1(full_graph)), "What are its main features?",
+                               source_map={"s1": "src208"}))[-1]
+    assert len(searched) == 2 and result["supported"] is False       # the names added, still nothing relevant
+    assert conversation.subject_query("q", ["a_b-c.pdf", "A B C.docx"]) == "q a b c"
+    assert not conversation.needs_subject("How many days of paid leave do employees get each year?")
+    assert conversation.needs_subject("Explain the architecture.") and conversation.needs_subject("What is this project about?")

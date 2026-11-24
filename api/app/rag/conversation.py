@@ -97,6 +97,30 @@ def is_broad(question: str) -> bool:
     return BROAD.search(question) is not None
 
 
+# "this project", "the document", "the app": a subject the question names only by pointing at it.
+POINTED = re.compile(r"\b(this|that|the|these|those)\s+(project|document|doc|file|pdf|app|application|system|"
+                     r"platform|product|tool|report|policy|repo|repository|website|site|page)s?\b", re.I)
+_POINTERS = {"it", "its", "this", "that", "these", "those", "they", "them", "their"}
+
+
+def needs_subject(question: str) -> bool:
+    """A question that does not say what it is about: it points (its features, this project) or asks about the
+    whole thing (overview, architecture, main features). At the start of a chat there is no earlier message to
+    say what "it" is, so the project's own source names are searched with it."""
+    return bool(set(words(question)) & _POINTERS) or POINTED.search(question) is not None or is_broad(question)
+
+
+def subject_query(question: str, titles: list[str]) -> str:
+    """The question followed by the names of the project's sources ("BharatAgent Studio Build Handoff")."""
+    names = []
+    for t in titles:
+        name = re.sub(r"\.(pdf|docx|md|markdown|txt|csv|xlsx)$", "", t.strip(), flags=re.I)
+        name = re.sub(r"[_\s]+", " ", name.replace("-", " ")).strip()[:80]
+        if name and name.lower() not in {n.lower() for n in names}:
+            names.append(name)
+    return f"{question} {'; '.join(names)}" if names else question
+
+
 REWRITE_SYSTEM = (
     "You turn the user's latest message into ONE standalone search query for searching their documents.\n"
     "Rules:\n"

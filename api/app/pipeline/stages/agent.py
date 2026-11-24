@@ -202,6 +202,17 @@ def _retrieve(ctx: RunContext, searchable: dict[str, str]) -> tuple[list[Chunk],
         else:
             earlier = [text for role, text, *_ in ctx.history if role == "user"]
             queries.insert(0, f"{earlier[-1][:300]} {ctx.question}")
+    elif conversation.needs_subject(ctx.question) and ctx.source_map is not None:
+        # A vague first question ("What are its main features?") has no earlier message to say what "its" is;
+        # the project does: search it together with the names of the sources this run may search (no model call).
+        # It only helps a matching chunk clear the threshold; the threshold, citations and claim check are unchanged.
+        try:
+            titles = store.source_titles(ctx.scope, source_ids)
+        except Exception as exc:  # never let this extra search break the answer
+            titles = []
+            ctx.warnings.append(f"Project source names were not used for the search: {exc}")
+        if titles:
+            queries.insert(0, conversation.subject_query(ctx.question, titles))
     queries = list(dict.fromkeys(queries))
     broad = any(conversation.is_broad(q) for q in queries)
     limit = BROAD_MAX if broad else settings.top_k
@@ -222,6 +233,7 @@ def _retrieve(ctx: RunContext, searchable: dict[str, str]) -> tuple[list[Chunk],
     relevant = (reused + ranked)[:max(limit, len(reused))]
     candidates = sorted(pool.values(), key=lambda c: c.similarity, reverse=True)[:limit]
     ctx.retrieval_info = {"follow_up": follow, "queries": queries, "rewrite": rewritten, "broad": broad,
+                          "project_subject": not follow and len(queries) > 1,
                           "reused": [f"{c.file_name} chunk {c.chunk_index}" for c in reused]}
     ctx.detailed = broad or bool(conversation.transforms(ctx.question) - {"translate"})
     return relevant, candidates

@@ -182,3 +182,8 @@ Fix (`api/app/rag/conversation.py`, `api/app/pipeline/stages/agent.py`, `retriev
   whose sentences cost many more tokens); every sentence is still citation- and claim-checked. Earlier answers
   are context for what is asked, never sources.
 - "In Telugu" / "in Hindi" in the question sets the answer language (the chat's language selector still wins).
+- A vague question at the start of a new chat ("What are its main features?", "Explain the architecture.") has
+  no earlier message to say what "its" is; it scored 0.425 against the threshold of 0.50 and was declined. Such a
+  question is now also searched together with the names of the sources this run may search (ready sources in
+  the project's scope only, at most five; no model call), which lifted it to 0.730 on the same document. Specific
+  first questions are searched exactly as before, and the threshold and checks are unchanged.

@@ -79,6 +79,21 @@ def search(question_vector: list[float], source_ids: list[str], k: int, scope: s
     return [Chunk(*r[:6], similarity=float(r[6]), origin=r[7]) for r in rows]
 
 
+def source_titles(scope: str, source_ids: list[str], limit: int = 5) -> list[str]:
+    """Titles of the registry sources behind these chunk source ids, in this scope only (the sources this run
+    may search). Used to give a vague first question ("what are its features?") the project's subject."""
+    if not source_ids:
+        return []
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT s.title FROM sources s
+               WHERE s.status = 'ready' AND s.id IN (SELECT DISTINCT source_ref FROM chunks
+                                                       WHERE scope = %s AND source_id = ANY(%s) AND source_ref IS NOT NULL)
+               ORDER BY s.id LIMIT %s""",
+            (scope, source_ids, limit)).fetchall()
+    return [r[0] for r in rows]
+
+
 def fetch(question_vector: list[float], scope: str, keys: list[tuple[str, int]]) -> list[Chunk]:
     """Chunks named by (source id, chunk index), re-read from the database now, with their similarity to the
     question. Used to reuse the evidence of an earlier answer: a chunk whose source was deleted, re-indexed or
